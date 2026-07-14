@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>OPPO门店库存扫码核单系统 (移动端增强版)</title>
-    <!-- Excel解析库 -->
     <script src="https://cdn.staticfile.net/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- 引入 HTML5 摄像头扫码核心库 -->
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <style>
         body { font-family: 'Microsoft YaHei', sans-serif; background-color: #f4f5f9; margin: 0; padding: 15px; color: #333; }
@@ -85,7 +83,6 @@
     </div>
 
     <div class="container">
-        <!-- 左侧：导入表格 -->
         <div class="panel left-panel">
             <h3>1. 上传系统库存表格</h3>
             <div class="file-upload-box">
@@ -102,14 +99,12 @@
             </div>
         </div>
 
-        <!-- 右侧：扫码与核对结果 -->
         <div class="panel right-panel">
-            <!-- 摄像头取景区域 -->
             <div id="camera-container">
                 <div id="reader"></div>
             </div>
 
-            <div class="scanner-box">
+            <div class="scanner-box" style="flex-direction: column; gap: 8px;">
                 <div style="display: flex; gap: 10px; width: 100%;">
                     <input type="text" id="scannerInput" class="scanner-input" placeholder="👉 光标在此可用扫码枪" disabled autocomplete="off">
                     <button id="cameraBtn" class="btn-camera" onclick="toggleCamera()" disabled>📷 开启摄像头</button>
@@ -161,11 +156,12 @@
         const clearBtn = document.getElementById('clearBtn');
         const cameraBtn = document.getElementById('cameraBtn');
 
-        // --- 摄像头扫码逻辑 (html5-qrcode) ---
+        // --- 优化后的摄像头扫码逻辑 (支持多镜头切换、响应式扫码框) ---
         let html5QrCode;
         let isCameraScanning = false;
         let lastScannedCode = "";
         let lastScanTime = 0;
+        const cameraSelect = document.getElementById('cameraSelect');
 
         function toggleCamera() {
             if (isCameraScanning) {
@@ -175,8 +171,17 @@
             }
         }
 
+        // 切换摄像头触发重启
+        function switchCamera() {
+            if (isCameraScanning && html5QrCode) {
+                html5QrCode.stop().then(() => {
+                    isCameraScanning = false;
+                    startCamera();
+                }).catch(err => console.error("切换摄像头失败", err));
+            }
+        }
+
         function startCamera() {
-            // 必须要HTTPS环境下才能调用摄像头 (localhost除外)
             if (window.isSecureContext === false) {
                 alert("⚠️ 浏览器安全限制：\n为了保护隐私，手机摄像头只能在 HTTPS 安全网址下才能被网页调用。\n建议将此网页托管部署后使用。");
                 return;
@@ -190,40 +195,95 @@
                 html5QrCode = new Html5Qrcode("reader");
             }
 
+            // 【优化】响应式扫描框配置 + 帧率拉满
             const config = { 
-                fps: 10, 
-                qrbox: { width: 250, height: 100 }, // 适合扫手机包装盒上的条形码(一维码)
+                fps: 20, // 帧率调高到 20 FPS（扫码更灵敏、无延迟）
+                qrbox: function(width, height) {
+                    // 动态计算：宽度占取景框的 80%（最大480px），高度固定为 130px，极佳的条形码黄金比例
+                    const boxWidth = Math.min(width * 0.8, 480);
+                    const boxHeight = 130;
+                    return { width: boxWidth, height: boxHeight };
+                },
                 aspectRatio: 1.777778
             };
 
-            // 优先使用后置摄像头
+            // 【核心】获取所有摄像头列表，解决镜头放大倍率过高问题
+            Html5Qrcode.getCameras().then(devices => {
+                if (devices && devices.length > 0) {
+                    cameraSelect.style.display = 'block'; // 显示切换菜单
+                    
+                    // 初始化下拉菜单
+                    if (cameraSelect.options.length === 0) {
+                        devices.forEach((device, index) => {
+                            const option = document.createElement('option');
+                            option.value = device.id;
+                            // 友好命名，若无标签则显示序号
+                            option.text = device.label || `摄像头 ${index + 1}`;
+                            cameraSelect.appendChild(option);
+                        });
+                        // 手机上通常最后一个摄像头（devices.length - 1）是后置超广角或主摄
+                        cameraSelect.value = devices[devices.length - 1].id;
+                    }
+
+                    const selectedCameraId = cameraSelect.value;
+
+                    // 启动选定的摄像头
+                    html5QrCode.start(
+                        selectedCameraId, 
+                        config, 
+                        (decodedText, decodedResult) => {
+                            const now = Date.now();
+                            // 同一个串码的过滤冷却降低到 1.5 秒，方便连续扫码
+                            if (decodedText === lastScannedCode && (now - lastScanTime < 1500)) {
+                                return; 
+                            }
+                            lastScannedCode = decodedText;
+                            lastScanTime = now;
+
+                            if (navigator.vibrate) {
+                                navigator.vibrate(80); // 震动时间稍微缩短，反馈更清脆
+                            }
+                            
+                            processScan(decodedText);
+                        },
+                        (errorMessage) => {
+                            // 扫描中未对准的报错静默处理
+                        }
+                    ).then(() => {
+                        isCameraScanning = true;
+                        if (audioCtx.state === 'suspended') audioCtx.resume();
+                    }).catch((err) => {
+                        alert(`启动该镜头失败，请尝试在下拉菜单中切换其他镜头。`);
+                        stopCamera();
+                    });
+
+                } else {
+                    // 降级方案：若获取不到列表，直接使用系统默认后置
+                    startDefaultCamera(config);
+                }
+            }).catch(err => {
+                console.warn("无法获取摄像头列表，已启用默认相机：", err);
+                startDefaultCamera(config);
+            });
+        }
+
+        // 降级启动方法
+        function startDefaultCamera(config) {
             html5QrCode.start({ facingMode: "environment" }, config, 
                 (decodedText, decodedResult) => {
                     const now = Date.now();
-                    // 防止同一秒内连续触发同一条码
-                    if (decodedText === lastScannedCode && (now - lastScanTime < 2000)) {
-                        return; 
-                    }
+                    if (decodedText === lastScannedCode && (now - lastScanTime < 1500)) return; 
                     lastScannedCode = decodedText;
                     lastScanTime = now;
-
-                    // 震动反馈 (支持的手机上)
-                    if (navigator.vibrate) {
-                        navigator.vibrate(100);
-                    }
-                    
-                    // 将扫到的码交给核心逻辑处理
+                    if (navigator.vibrate) navigator.vibrate(80);
                     processScan(decodedText);
                 },
-                (errorMessage) => {
-                    // 扫描过程中的解析错误（未对准等），直接忽略不影响体验
-                }
+                (errorMessage) => {}
             ).then(() => {
                 isCameraScanning = true;
-                // 唤醒音频引擎（因为这是由按钮点击触发的，可以合法解锁AudioContext）
                 if (audioCtx.state === 'suspended') audioCtx.resume();
             }).catch((err) => {
-                alert(`无法启动摄像头，请确保已授予浏览器摄像头权限。错误信息：${err}`);
+                alert(`无法启动摄像头，请确保已授予浏览器摄像头权限。`);
                 stopCamera();
             });
         }
@@ -232,6 +292,7 @@
             if (html5QrCode && isCameraScanning) {
                 html5QrCode.stop().then(() => {
                     document.getElementById('camera-container').style.display = 'none';
+                    cameraSelect.style.display = 'none'; // 隐藏下拉框，保持界面清爽
                     cameraBtn.innerHTML = '📷 开启摄像头';
                     cameraBtn.classList.remove('active');
                     isCameraScanning = false;
@@ -460,10 +521,8 @@
 
         // 核心扫码比对逻辑 (摄像头与扫码枪共用此方法)
         function processScan(code) {
-            // 解锁音频上下文（兼容部分浏览器限制）
             if (audioCtx.state === 'suspended') audioCtx.resume();
             
-            // 为了视觉体验，如果是手机摄像头扫的，也在输入框闪烁一下
             if (isCameraScanning) {
                 scannerInput.value = code;
                 setTimeout(() => scannerInput.value = '', 500);
