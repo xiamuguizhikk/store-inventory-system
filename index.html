@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OPPO门店库存扫码核单系统 (移动端增强版)</title>
+    <!-- Excel解析库 -->
+    <script src="https://cdn.staticfile.net/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- 引入 HTML5 摄像头扫码核心库 -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; background-color: #f4f5f9; margin: 0; padding: 15px; color: #333; }
+        .header { text-align: center; margin-bottom: 15px; }
+        .header h2 { margin: 0; font-size: 20px; }
+        
+        /* 响应式布局：在手机上变为上下排列，电脑上是左右排列 */
+        .container { display: flex; flex-direction: column; gap: 15px; max-width: 1300px; margin: 0 auto; }
+        @media (min-width: 768px) {
+            .container { flex-direction: row; }
+            .left-panel { flex: 1; }
+            .right-panel { flex: 2; }
+            body { padding: 20px; }
+            .header h2 { font-size: 24px; }
+        }
+
+        .panel { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .file-upload-box { border: 2px dashed #007bff; padding: 20px; text-align: center; background: #f8f9fa; border-radius: 6px; cursor: pointer; position: relative; margin-bottom: 10px; transition: all 0.3s; }
+        .file-upload-box:hover { background: #f0f4f8; border-color: #0056b3; }
+        .file-upload-box input[type="file"] { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+        .file-upload-box p { margin: 0; color: #666; font-size: 14px; }
+        .file-upload-box .icon { font-size: 32px; color: #007bff; margin-bottom: 5px; }
+        .file-info { margin-top: 10px; font-size: 13px; color: #28a745; font-weight: bold; display: none; text-align: center; line-height: 1.5; }
+        
+        .scanner-box { display: flex; gap: 10px; margin-bottom: 15px; }
+        .scanner-input { flex: 1; padding: 12px; font-size: 18px; border: 2px solid #28a745; border-radius: 4px; box-sizing: border-box; text-align: center; background-color: #eafbf0; }
+        .scanner-input:focus { outline: none; border-color: #218838; box-shadow: 0 0 8px rgba(40,167,69,0.5); }
+        .btn-camera { padding: 0 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; white-space: nowrap; }
+        .btn-camera:hover { background-color: #0056b3; }
+        .btn-camera.active { background-color: #dc3545; }
+        
+        /* 摄像头取景框样式 */
+        #camera-container { display: none; margin-bottom: 15px; border-radius: 8px; overflow: hidden; border: 2px solid #007bff; }
+        #reader { width: 100%; background: #000; }
+
+        .action-bar { display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; }
+        @media (min-width: 768px) {
+            .action-bar { flex-direction: row; justify-content: space-between; align-items: center; }
+        }
+        
+        .stats { font-weight: bold; font-size: 14px; display: flex; flex-wrap: wrap; gap: 10px; }
+        .btn-group { display: flex; gap: 10px; width: 100%; }
+        @media (min-width: 768px) { .btn-group { width: auto; } }
+        
+        .btn-export { flex: 1; padding: 10px; background-color: #28a745; color: white; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; font-weight: bold; }
+        .btn-export:disabled { background-color: #6c757d; cursor: not-allowed; }
+        .btn-clear { flex: 1; padding: 10px; background-color: #dc3545; color: white; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; font-weight: bold; }
+        .btn-clear:disabled { background-color: #6c757d; cursor: not-allowed; }
+
+        .lists { display: flex; flex-direction: column; gap: 15px; }
+        @media (min-width: 768px) {
+            .lists { flex-direction: row; }
+        }
+        
+        .list-column { flex: 1; border: 1px solid #eee; border-radius: 4px; padding: 10px; background-color: #fafafa; height: 400px; overflow-y: auto; }
+        .list-column h3 { margin-top: 0; text-align: center; font-size: 15px; padding-bottom: 10px; border-bottom: 1px solid #ddd; position: sticky; top: 0; background: #fafafa; margin-bottom: 10px; }
+        
+        .item { padding: 8px; border-bottom: 1px dashed #ccc; background: #fff; margin-bottom: 5px; border-radius: 4px; }
+        .item-code { font-family: monospace; font-size: 14px; font-weight: bold; margin-bottom: 4px; }
+        .item-detail { font-size: 12px; color: #666; line-height: 1.4; }
+        .tag { display: inline-block; padding: 2px 5px; border-radius: 3px; margin-right: 4px; font-size: 11px; }
+        .tag-category { background: #e9ecef; color: #495057; }
+        .tag-type-normal { background: #e3f2fd; color: #0d47a1; font-weight: bold; }
+        .tag-type-demo { background: #fff3e0; color: #e65100; font-weight: bold; }
+
+        .pending-title { color: #6c757d; }
+        .success-title { color: #28a745; }
+        .error-title { color: #dc3545; }
+        .msg { text-align: center; min-height: 24px; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h2>OPPO门店库存扫码核对系统</h2>
+    </div>
+
+    <div class="container">
+        <!-- 左侧：导入表格 -->
+        <div class="panel left-panel">
+            <h3>1. 上传系统库存表格</h3>
+            <div class="file-upload-box">
+                <div class="icon">📊</div>
+                <p>点击选择 或 拖拽表格到此处<br><span style="font-size: 12px; color:#888;">(支持 .csv / .xlsx 格式)</span></p>
+                <input type="file" id="excelFile" accept=".xlsx, .xls, .csv" onchange="importExcel(this)">
+            </div>
+            <div id="fileInfo" class="file-info"></div>
+            <div style="font-size: 12px; color: #888; margin-top: 15px; line-height: 1.6;">
+                💡 <b>支持手机版特性：</b><br>
+                📱 <b>手机扫码：</b> 点击“开启摄像头”，可直接用手机镜头扫实物条码。<br>
+                🔊 <b>提示音：</b> 扫码成功滴一声，异常则长鸣报警。<br>
+                💾 <b>防断电：</b> 进度实时本地保存，刷新网页也能恢复！
+            </div>
+        </div>
+
+        <!-- 右侧：扫码与核对结果 -->
+        <div class="panel right-panel">
+            <!-- 摄像头取景区域 -->
+            <div id="camera-container">
+                <div id="reader"></div>
+            </div>
+
+            <div class="scanner-box">
+                <input type="text" id="scannerInput" class="scanner-input" placeholder="👉 光标在此可用扫码枪" disabled autocomplete="off">
+                <button id="cameraBtn" class="btn-camera" onclick="toggleCamera()" disabled>📷 开启摄像头</button>
+            </div>
+            <div id="alertMsg" class="msg"></div>
+
+            <div class="action-bar">
+                <div class="stats">
+                    <span>总数:<span id="totalCount">0</span></span>
+                    <span class="success-title">✅已核:<span id="verifiedCount">0</span></span>
+                    <span class="pending-title">⏳待盘:<span id="pendingCount">0</span></span>
+                    <span class="error-title">❌异常:<span id="errorCount">0</span></span>
+                </div>
+                <div class="btn-group">
+                    <button id="clearBtn" class="btn-clear" onclick="clearProgress()" disabled>🗑️ 清除进度</button>
+                    <button id="exportBtn" class="btn-export" onclick="exportResult()" disabled>📥 导出明细</button>
+                </div>
+            </div>
+
+            <div class="lists">
+                <div class="list-column">
+                    <h3 class="success-title">✅ 已核对</h3>
+                    <div id="verifiedList"></div>
+                </div>
+                <div class="list-column">
+                    <h3 class="pending-title">⏳ 待盘点</h3>
+                    <div id="pendingList"></div>
+                </div>
+                <div class="list-column">
+                    <h3 class="error-title">❌ 异常</h3>
+                    <div id="errorList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let expectedInventory = new Map(); 
+        let verifiedInventory = new Set(); 
+        let errorInventory = []; 
+        let currentFileName = "";
+
+        const scannerInput = document.getElementById('scannerInput');
+        const alertMsg = document.getElementById('alertMsg');
+        const fileInfo = document.getElementById('fileInfo');
+        const exportBtn = document.getElementById('exportBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const cameraBtn = document.getElementById('cameraBtn');
+
+        // --- 摄像头扫码逻辑 (html5-qrcode) ---
+        let html5QrCode;
+        let isCameraScanning = false;
+        let lastScannedCode = "";
+        let lastScanTime = 0;
+
+        function toggleCamera() {
+            if (isCameraScanning) {
+                stopCamera();
+            } else {
+                startCamera();
+            }
+        }
+
+        function startCamera() {
+            // 必须要HTTPS环境下才能调用摄像头 (localhost除外)
+            if (window.isSecureContext === false) {
+                alert("⚠️ 浏览器安全限制：\n为了保护隐私，手机摄像头只能在 HTTPS 安全网址下才能被网页调用。\n建议将此网页托管部署后使用。");
+                return;
+            }
+
+            document.getElementById('camera-container').style.display = 'block';
+            cameraBtn.innerHTML = '⏹ 关闭摄像头';
+            cameraBtn.classList.add('active');
+
+            if (!html5QrCode) {
+                html5QrCode = new Html5Qrcode("reader");
+            }
+
+            const config = { 
+                fps: 10, 
+                qrbox: { width: 250, height: 100 }, // 适合扫手机包装盒上的条形码(一维码)
+                aspectRatio: 1.777778
+            };
+
+            // 优先使用后置摄像头
+            html5QrCode.start({ facingMode: "environment" }, config, 
+                (decodedText, decodedResult) => {
+                    const now = Date.now();
+                    // 防止同一秒内连续触发同一条码
+                    if (decodedText === lastScannedCode && (now - lastScanTime < 2000)) {
+                        return; 
+                    }
+                    lastScannedCode = decodedText;
+                    lastScanTime = now;
+
+                    // 震动反馈 (支持的手机上)
+                    if (navigator.vibrate) {
+                        navigator.vibrate(100);
+                    }
+                    
+                    // 将扫到的码交给核心逻辑处理
+                    processScan(decodedText);
+                },
+                (errorMessage) => {
+                    // 扫描过程中的解析错误（未对准等），直接忽略不影响体验
+                }
+            ).then(() => {
+                isCameraScanning = true;
+                // 唤醒音频引擎（因为这是由按钮点击触发的，可以合法解锁AudioContext）
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+            }).catch((err) => {
+                alert(`无法启动摄像头，请确保已授予浏览器摄像头权限。错误信息：${err}`);
+                stopCamera();
+            });
+        }
+
+        function stopCamera() {
+            if (html5QrCode && isCameraScanning) {
+                html5QrCode.stop().then(() => {
+                    document.getElementById('camera-container').style.display = 'none';
+                    cameraBtn.innerHTML = '📷 开启摄像头';
+                    cameraBtn.classList.remove('active');
+                    isCameraScanning = false;
+                }).catch(err => {
+                    console.error("无法停止摄像头", err);
+                });
+            }
+        }
+        // ------------------------------------
+
+        // 音频合成引擎初始化
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioContext();
+
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            if (type === 'success') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(1200, audioCtx.currentTime); 
+                gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'error') {
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+                gainNode.gain.setValueAtTime(0.6, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + 0.4);
+            } else if (type === 'warn') {
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(440, audioCtx.currentTime);
+                gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + 0.2);
+            }
+        }
+
+        // --- 本地进度保存与恢复逻辑 ---
+        function saveProgress() {
+            const state = {
+                fileName: currentFileName,
+                expected: Array.from(expectedInventory.entries()),
+                verified: Array.from(verifiedInventory),
+                errors: errorInventory
+            };
+            localStorage.setItem('oppoInventoryProgress', JSON.stringify(state));
+        }
+
+        function loadProgress() {
+            const savedStr = localStorage.getItem('oppoInventoryProgress');
+            if (savedStr) {
+                try {
+                    const state = JSON.parse(savedStr);
+                    if (state.expected && state.expected.length > 0) {
+                        const isResume = confirm(`检测到上次未完成的盘点进度（文件：${state.fileName}）。\n\n点击【确定】恢复上次的盘点数据\n点击【取消】清空记录并重新开始`);
+                        if (isResume) {
+                            currentFileName = state.fileName;
+                            expectedInventory = new Map(state.expected);
+                            verifiedInventory = new Set(state.verified);
+                            errorInventory = state.errors;
+
+                            scannerInput.disabled = false;
+                            exportBtn.disabled = false;
+                            clearBtn.disabled = false;
+                            cameraBtn.disabled = false;
+                            
+                            fileInfo.style.display = "block";
+                            fileInfo.style.color = "#007bff";
+                            fileInfo.innerText = `🔄 已恢复进度：📁 ${currentFileName}\n包含 ${expectedInventory.size} 条数据。`;
+                            
+                            updateUI();
+                            return true;
+                        } else {
+                            localStorage.removeItem('oppoInventoryProgress');
+                        }
+                    }
+                } catch (e) {
+                    localStorage.removeItem('oppoInventoryProgress');
+                }
+            }
+            return false;
+        }
+
+        function clearProgress() {
+            if (confirm("确定要清空当前的盘点进度吗？清空后将无法恢复，需要重新上传表格！")) {
+                localStorage.removeItem('oppoInventoryProgress');
+                expectedInventory.clear();
+                verifiedInventory.clear();
+                errorInventory = [];
+                currentFileName = "";
+                
+                resetUpload();
+                updateUI();
+                alertMsg.innerText = "进度已清空，请上传新表格。";
+                alertMsg.style.color = "#333";
+                stopCamera();
+            }
+        }
+
+        window.onload = function() {
+            loadProgress();
+        };
+        // ------------------------------
+
+        // 导入并解析表格
+        function importExcel(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            if (typeof XLSX === 'undefined') {
+                alert("加载失败：解析组件被网络拦截。请刷新网页重试。");
+                resetUpload();
+                return;
+            }
+
+            fileInfo.style.display = "block";
+            fileInfo.style.color = "#007bff";
+            fileInfo.innerText = "正在提取表格数据，请稍候...";
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const json = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+                    
+                    if (json.length === 0) {
+                        alert("表格内未提取到数据！");
+                        resetUpload();
+                        return;
+                    }
+
+                    const keys = Object.keys(json[0]);
+                    const imeiKey = keys.find(k => k.includes('IMEI') || k.includes('SN') || k.includes('串码') || k.includes('序列号'));
+                    const nameKey = keys.find(k => k.includes('SPU') || k.includes('商品名称') || k.includes('机型'));
+                    const catKey = keys.find(k => k.includes('类目') || k.includes('分类'));
+                    const typeKey = keys.find(k => k.includes('库存类型') || k.includes('商品类型'));
+
+                    if (!imeiKey) {
+                        alert("解析失败：未能找到包含【IMEI】、【SN】或【串码】的表头列。");
+                        resetUpload();
+                        return;
+                    }
+
+                    expectedInventory.clear();
+                    verifiedInventory.clear();
+                    errorInventory = [];
+                    currentFileName = file.name;
+
+                    json.forEach(row => {
+                        if (row[imeiKey]) {
+                            const imei = String(row[imeiKey]).trim();
+                            if (imei && imei !== '') {
+                                expectedInventory.set(imei, {
+                                    name: nameKey && row[nameKey] ? String(row[nameKey]).trim() : '未命名商品',
+                                    category: catKey && row[catKey] ? String(row[catKey]).trim() : '-',
+                                    type: typeKey && row[typeKey] ? String(row[typeKey]).trim() : '-'
+                                });
+                            }
+                        }
+                    });
+
+                    if (expectedInventory.size === 0) {
+                        alert("串码列中没有读取到数据！");
+                        resetUpload();
+                        return;
+                    }
+
+                    scannerInput.disabled = false;
+                    exportBtn.disabled = false;
+                    clearBtn.disabled = false;
+                    cameraBtn.disabled = false;
+                    
+                    fileInfo.style.color = "#28a745";
+                    fileInfo.innerText = `📁 ${currentFileName}\n成功提取 ${expectedInventory.size} 条库存数据。`;
+                    
+                    alertMsg.style.color = "#28a745";
+                    alertMsg.innerText = "🎉 加载成功！可使用扫码枪或摄像头开始扫码！";
+                    
+                    updateUI();
+                    saveProgress();
+                    
+                    if(window.innerWidth > 768) {
+                        setTimeout(() => scannerInput.focus(), 100);
+                    }
+
+                } catch (error) {
+                    console.error("解析错误:", error);
+                    alert("表格读取失败。如果文件是以 .csv 结尾，请尝试另存为 .xlsx 格式后再上传。");
+                    resetUpload();
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function resetUpload() {
+            document.getElementById('excelFile').value = '';
+            fileInfo.style.display = "none";
+            scannerInput.disabled = true;
+            exportBtn.disabled = true;
+            clearBtn.disabled = true;
+            cameraBtn.disabled = true;
+        }
+
+        // 支持外接扫码枪键盘事件
+        scannerInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const code = scannerInput.value.trim();
+                scannerInput.value = ''; 
+                if (code !== '') processScan(code);
+            }
+        });
+
+        // 核心扫码比对逻辑 (摄像头与扫码枪共用此方法)
+        function processScan(code) {
+            // 解锁音频上下文（兼容部分浏览器限制）
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            // 为了视觉体验，如果是手机摄像头扫的，也在输入框闪烁一下
+            if (isCameraScanning) {
+                scannerInput.value = code;
+                setTimeout(() => scannerInput.value = '', 500);
+            }
+
+            if (verifiedInventory.has(code)) {
+                playSound('error');
+                alertMsg.style.color = "#dc3545";
+                alertMsg.innerText = `⚠️ 警告：【${code}】重复扫描！`;
+            } else if (expectedInventory.has(code)) {
+                playSound('success');
+                verifiedInventory.add(code);
+                const info = expectedInventory.get(code);
+                alertMsg.style.color = "#28a745";
+                alertMsg.innerText = `✅ 成功：[${info.type}] ${info.name}`;
+            } else {
+                let possibleMatch = null;
+                const sortedCode = code.split('').sort().join(''); 
+                
+                for (let [pendingCode, info] of expectedInventory.entries()) {
+                    if (!verifiedInventory.has(pendingCode)) {
+                        if (sortedCode === pendingCode.split('').sort().join('')) {
+                            possibleMatch = pendingCode;
+                            break;
+                        }
+                    }
+                }
+
+                if (possibleMatch) {
+                    playSound('warn');
+                    errorInventory.push({ code: code, msg: `疑似乱序 (原码:${possibleMatch})` });
+                    alertMsg.style.color = "#ff9800"; 
+                    alertMsg.innerText = `⚠️ 注意：输入疑似乱序！`;
+                } else {
+                    playSound('error');
+                    errorInventory.push({ code: code, msg: '不在库' });
+                    alertMsg.style.color = "#dc3545";
+                    alertMsg.innerText = `❌ 异常：【${code}】不在库中！`;
+                }
+            }
+            
+            updateUI();
+            saveProgress(); 
+        }
+
+        function createItemHtml(code, name, category, type, errorMsg = '') {
+            let typeTagHtml = '';
+            if (type && type !== '-') {
+                let tagClass = type.includes('演示') ? 'tag tag-type-demo' : 'tag tag-type-normal';
+                typeTagHtml = `<span class="${tagClass}">${type}</span>`;
+            }
+
+            let catTagHtml = category && category !== '-' ? `<span class="tag tag-category">${category}</span>` : '';
+            let detailHtml = name ? `<div class="item-detail">${typeTagHtml}${catTagHtml} ${name}</div>` : '';
+            let errorHtml = errorMsg ? `<div class="item-detail" style="color:#dc3545; font-weight:bold;">${errorMsg}</div>` : '';
+            
+            return `<div class="item"><div class="item-code">${code}</div>${detailHtml}${errorHtml}</div>`;
+        }
+
+        function updateUI() {
+            document.getElementById('totalCount').innerText = expectedInventory.size;
+            document.getElementById('verifiedCount').innerText = verifiedInventory.size;
+            document.getElementById('pendingCount').innerText = expectedInventory.size - verifiedInventory.size;
+            document.getElementById('errorCount').innerText = errorInventory.length;
+
+            let verifiedHtml = '';
+            let pendingHtml = '';
+            
+            let verifiedArray = Array.from(verifiedInventory).reverse();
+            verifiedArray.forEach(imei => {
+                const info = expectedInventory.get(imei);
+                verifiedHtml += createItemHtml(imei, info.name, info.category, info.type);
+            });
+
+            expectedInventory.forEach((info, imei) => {
+                if (!verifiedInventory.has(imei)) {
+                    pendingHtml += createItemHtml(imei, info.name, info.category, info.type);
+                }
+            });
+
+            document.getElementById('verifiedList').innerHTML = verifiedHtml;
+            document.getElementById('pendingList').innerHTML = pendingHtml;
+            
+            let errorArray = [...errorInventory].reverse();
+            document.getElementById('errorList').innerHTML = errorArray.map(err => createItemHtml(err.code, '', '', '', err.msg)).join('');
+        }
+
+        function exportResult() {
+            if (expectedInventory.size === 0) return;
+
+            let exportData = [];
+            expectedInventory.forEach((info, imei) => {
+                if (verifiedInventory.has(imei)) {
+                    exportData.push({ '盘点状态': '✅ 已核对(在库)', 'IMEI/SN': imei, '商品名称': info.name, '商品类目': info.category, '库存类型': info.type });
+                } else {
+                    exportData.push({ '盘点状态': '⏳ 待盘点(缺库)', 'IMEI/SN': imei, '商品名称': info.name, '商品类目': info.category, '库存类型': info.type });
+                }
+            });
+            errorInventory.forEach(err => {
+                exportData.push({ '盘点状态': `❌ 异常 (${err.msg})`, 'IMEI/SN': err.code, '商品名称': '-', '商品类目': '-', '库存类型': '-' });
+            });
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "门店盘点明细");
+            
+            const now = new Date();
+            const timeStr = `${now.getMonth()+1}月${now.getDate()}日_${now.getHours()}时${now.getMinutes()}分`;
+            
+            XLSX.writeFile(workbook, `门店盘点明细表_${timeStr}.xlsx`);
+        }
+    </script>
+</body>
+</html>
