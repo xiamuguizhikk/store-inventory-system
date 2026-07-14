@@ -110,8 +110,11 @@
             </div>
 
             <div class="scanner-box">
-                <input type="text" id="scannerInput" class="scanner-input" placeholder="👉 光标在此可用扫码枪" disabled autocomplete="off">
-                <button id="cameraBtn" class="btn-camera" onclick="toggleCamera()" disabled>📷 开启摄像头</button>
+                <div style="display: flex; gap: 10px; width: 100%;">
+                    <input type="text" id="scannerInput" class="scanner-input" placeholder="👉 光标在此可用扫码枪" disabled autocomplete="off">
+                    <button id="cameraBtn" class="btn-camera" onclick="toggleCamera()" disabled>📷 开启摄像头</button>
+                </div>
+                <select id="cameraSelect" style="width: 100%; padding: 10px; font-size: 14px; border-radius: 4px; border: 2px solid #007bff; display: none; background: #fff;" onchange="switchCamera()"></select>
             </div>
             <div id="alertMsg" class="msg"></div>
 
